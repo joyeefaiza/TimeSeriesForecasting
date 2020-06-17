@@ -1,0 +1,221 @@
+#importing libraries
+from datetime import datetime
+from datetime import timedelta
+start_time = datetime.now()
+import warnings
+import itertools
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import matplotlib
+from datetime import datetime
+import matplotlib.pyplot as pyplot
+from sklearn.metrics import mean_absolute_error
+import math
+%matplotlib inline
+
+#filtering warnings if shown for some data
+warnings.filterwarnings("ignore")
+pyplot.style.use('fivethirtyeight')
+
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import requests
+import urllib.request
+import time
+import pandas as pd
+from bs4 import BeautifulSoup
+
+limit=7 #number of pages to load from website
+counter = 0 # loop counter while fetching data
+#datepicker=''
+#driver = webdriver.Chrome()
+driver = webdriver.Chrome(ChromeDriverManager().install())  #library for web crawling to use google chrome
+#driver = webdriver.Chrome(executable_path=r'C:\path\to\chromedriver.exe')
+res = pd.DataFrame() #creating a dataframe object
+#PATH = os.path.join("C:\\\\","Users","xxx","Documents","py") # you need to change to your local path\nres = pd.DataFrame()
+url = "https://transparency.entsoe.eu/load-domain/r2/totalLoadR2/show?name=&defaultValue=false&viewType=TABLE&areaType=BZN&atch=false&dateTime.dateTime=01.09.2019+00:00|CET|DAY&biddingZone.values=CTY|10YGR-HTSO-----Y!BZN|10YGR-HTSO-----Y&dateTime.timezone=CET_CEST&dateTime.timezone_input=CET+(UTC+1)+/+CEST+(UTC+2)"
+driver.get(url)
+
+#fetching datas row-wise
+def table_to_df(table):
+    return pd.DataFrame([[td.text for td in row.findAll('td')] for row in table.tbody.findAll('tr')])
+
+#clicking the next page using html marker
+def next_page():
+    element = driver.find_element_by_css_selector('div[class*="datepicker-arrow-right"]')
+    driver.execute_script("arguments[0].click();", element)
+    time.sleep(2)
+    return driver.current_url
+
+#looping for collecting datas
+while counter<limit:
+ response = requests.get(url)
+ # using beautiful soup library for parsing the html page
+ soup = BeautifulSoup(response.text, "html.parser")
+ #looking for any table content the html code
+ table = soup.find('table')
+ #adding the table to rest of the data
+ res = res.append(table_to_df(table))
+
+ #fetching the date from which we are counting
+ if counter==0:
+    myDate = soup.find(id='dv-date-from')
+    global datepicker
+    datepicker=myDate.attrs['value']
+ 
+ 
+ #res.to_csv(os.path.join(os.path.join(PATH,"table.csv")), index=None, sep=\';\', encoding=\'iso-8859–1\')
+ #driver.find_element_by_css_selector(\'.datepicker-arrow-right\').click()
+ 
+ #going to next page 
+ url=next_page()
+ counter += 1
+
+#formatting the date
+datepicker=datepicker[0:10]
+#datepicker=datepicker.replace(".", "-")
+startDate=datetime.strptime(datepicker, '%d.%m.%Y') #needed to convert the starting point to date for pd date_range
+
+
+############# WEB crawling part ends##############################
+
+#Forecasting starts here
+
+# formatting data
+res['Forecast Value']=pd.to_numeric(res[1])
+res['Actual Value']=pd.to_numeric(res[2])
+res['Time']= pd.date_range(start=startDate,periods=limit*24, freq='H')
+res = res.set_index('Time')
+res.drop(res.columns[[0,1,2]], axis=1, inplace=True) # have to add a life to save as  CSV
+print(res)
+print(res.dtypes)
+res.plot(figsize=(15, 6))
+pyplot.show() ; 
+from pylab import rcParams
+rcParams['figure.figsize'] = 18, 8
+#u1.index=u1.index.to_timestamp()
+#u1 = u1[\'Time\'].resample(\'H\').bfill()
+websiteData=res.copy()
+websiteData=websiteData.drop(columns='Forecast Value', axis=1)
+# provide a simple framework that you can use to analyze your data in terms of seasonality,trend,residuals.
+decomposition = sm.tsa.seasonal_decompose(websiteData, freq=23, model='additive')
+fig = decomposition.plot()
+pyplot.show()
+
+
+p = d = q = range(0, 2)
+pdq = list(itertools.product(p, d, q))
+seasonal_pdq = [(x[0], x[1], x[2], 24) for x in 
+               list(itertools.product(p, d, q))]
+finalRes=res.copy()
+finalRes.drop(['Forecast Value'], axis=1)
+finalRes = finalRes['Actual Value'].resample('H').bfill()
+
+
+# evaluate combinations of p, d and q values for an ARIMA model
+
+best_aic, best_param,best_seasonalParam = float("inf"), None, None
+
+
+
+     
+for param in pdq:
+    for param_seasonal in seasonal_pdq:
+        try:
+            #fitting the model and see which combination yeilds better result
+            mod = sm.tsa.statespace.SARIMAX(finalRes,
+                                            order=param,
+                                            seasonal_order=param_seasonal,
+                                            enforce_stationarity=False,
+                                            enforce_invertibility=False)
+            results = mod.fit()
+            if results.aic < best_aic:
+                best_aic, best_param,best_seasonalParam = results.aic, param, param_seasonal
+            print('ARIMA{}x{} - AIC:{}'.format(param, param_seasonal, results.aic))
+        except:
+            continue
+
+
+print('Best ARIMA Order is {} and {} with lowest AIC value {}'.format(best_param, best_seasonalParam, best_aic))
+
+                    
+
+                    
+#combination with lowest AIC
+mod = sm.tsa.statespace.SARIMAX(finalRes,
+                                order=best_param,
+                                seasonal_order=best_seasonalParam,
+                                enforce_stationarity=False,
+                                enforce_invertibility=False)
+results1 = mod.fit()
+print(results1.summary().tables[1])
+#diagnosis for the predicted values
+results1.plot_diagnostics(figsize=(16, 8))
+pyplot.show()
+
+#results1.plot_diagnostics(figsize=(16, 8))
+#pyplot.show()
+
+#pyplot.plot()
+#pyplot.show(results1)
+
+### determining the start and end of prediction date ########
+StartPred=startDate+timedelta(days=2)
+EndPred=StartPred+timedelta(days=14)
+dt_date=finalRes.tail(1)
+t=dt_date.index.tolist()
+#st=t[0].date()
+#st=st.strftime("%x")
+Endtrue=t[0]
+#Endtrue=startDate+timedelta(days=limit-1)
+print("start pred: {} , End of pred: {} , end of true value: {}".format(StartPred,EndPred,Endtrue))
+pred = results1.get_prediction(start=StartPred,end=EndPred, dynamic=False)
+
+pred_ci = pred.conf_int()
+#plotting prediction graph with observed values
+ax = finalRes[:].plot(label='observed')
+pred.predicted_mean.plot(ax=ax, label='Forecast', alpha=.7, figsize=(12, 4))
+ax.fill_between(pred_ci.index,
+                pred_ci.iloc[:, 0],
+                pred_ci.iloc[:, 1], color='k', alpha=.2)
+ax.set_xlabel('Time')
+ax.set_ylabel('Loads')
+pyplot.legend()
+pyplot.show()
+
+# forecast validation
+y_forecasted = pred.predicted_mean[:Endtrue]
+y_truth = finalRes[StartPred:]
+print('forecast values ' ,y_forecasted)
+print('true values ' ,y_truth)
+
+# Compute the mean square error
+mse = ((y_forecasted - y_truth) ** 2).mean()
+print('The Mean Squared Error of our forecasts is {}'.format(round(mse, 2)))
+RMSE=math.sqrt(mse)
+print('The Root Mean Squared Error of our forecasts is {}'.format(round(RMSE, 2)))
+
+mae = mean_absolute_error(y_truth, y_forecasted)
+print('MAE: %f' % mae)
+
+import numpy as np
+
+def mean_absolute_percentage_error(y_true, y_pred): 
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+mape=mean_absolute_percentage_error(y_truth,y_forecasted)
+print('MAPE: %f' % mape)
+
+newRes = pd.DataFrame()
+newRes['Entsoe Forecast Value']=res['Forecast Value']
+newRes['Actual Value']=res['Actual Value']
+newRes['Predicted Value']=y_forecasted
+newRes.plot(figsize=(15, 6))
+pyplot.show()
+end_time = datetime.now()
+print('Duration: {}'.format(end_time - start_time))
