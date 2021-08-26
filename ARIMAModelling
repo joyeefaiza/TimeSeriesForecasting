@@ -30,7 +30,7 @@ import time
 import pandas as pd
 from bs4 import BeautifulSoup
 
-limit=7 #number of pages to load from website
+limit=14 #number of pages to load from website
 counter = 0 # loop counter while fetching data
 #datepicker=''
 #driver = webdriver.Chrome()
@@ -115,6 +115,7 @@ seasonal_pdq = [(x[0], x[1], x[2], 24) for x in
 finalRes=res.copy()
 finalRes.drop(['Forecast Value'], axis=1)
 finalRes = finalRes['Actual Value'].resample('H').bfill()
+print(finalRes)
 
 
 # evaluate combinations of p, d and q values for an ARIMA model
@@ -165,8 +166,8 @@ pyplot.show()
 #pyplot.show(results1)
 
 ### determining the start and end of prediction date ########
-StartPred=startDate+timedelta(days=2)
-EndPred=StartPred+timedelta(days=14)
+StartPred=startDate+timedelta(days=4)
+EndPred=StartPred+timedelta(days=limit)
 dt_date=finalRes.tail(1)
 t=dt_date.index.tolist()
 #st=t[0].date()
@@ -200,7 +201,7 @@ print('The Mean Squared Error of our forecasts is {}'.format(round(mse, 2)))
 RMSE=math.sqrt(mse)
 print('The Root Mean Squared Error of our forecasts is {}'.format(round(RMSE, 2)))
 
-mae = mean_absolute_error(y_truth, y_forecasted)
+#mae = mean_absolute_error(y_truth, y_forecasted)
 print('MAE: %f' % mae)
 
 import numpy as np
